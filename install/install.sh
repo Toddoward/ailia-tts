@@ -1,111 +1,65 @@
 #!/bin/bash
-# Ailia TTS - Local Server Installer (Linux / macOS)
-# Installs Python, downloads CosyVoice3 ONNX models, sets up the streaming TTS server.
-# Safe to re-run: skips existing files, updates server files to the repo version.
-
+# Ailia TTS v3 - Linux/macOS Installer
 set -e
 
-INSTALL_DIR="$HOME/.ailia-tts"
-MODEL_DIR="$INSTALL_DIR/models"
-PYTHON_MIN="3.10"
+echo "============================================"
+echo " Ailia TTS v3 Installer (Linux/macOS)"
+echo "============================================"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
-VERSION_FILE="$REPO_DIR/VERSION"
-
-REPO_VERSION="unknown"
-if [ -f "$VERSION_FILE" ]; then
-    REPO_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
-fi
-
-echo "=========================================="
-echo " Ailia TTS - Local Server Installer"
-echo "=========================================="
-echo ""
-echo "[INFO] Repo version: $REPO_VERSION"
-echo ""
-
-# --- Check Python ---
-if command -v python3 &> /dev/null; then
-    PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    echo "[OK] Python $PY_VER found"
-else
-    echo "[ERROR] Python 3 is not installed."
-    echo "Please install Python 3.10+ from https://www.python.org/downloads/"
+# Check Python
+if ! command -v python3 &> /dev/null; then
+    echo "[ERROR] Python 3 not found"
     exit 1
 fi
+echo "[OK] Python found"
 
-# --- Create directories ---
-mkdir -p "$INSTALL_DIR" "$MODEL_DIR"
-echo "[OK] Install directory: $INSTALL_DIR"
-
-# --- Copy server files (always refresh to repo version) ---
-echo "Copying server files..."
-cp -f "$REPO_DIR/server/tts_streaming_server.py" "$INSTALL_DIR/"
-cp -f "$REPO_DIR/server/requirements.txt" "$INSTALL_DIR/"
-cp -f "$REPO_DIR/server/ailia_prompt.wav" "$INSTALL_DIR/"
-cp -f "$REPO_DIR/server/prompt_info.txt" "$INSTALL_DIR/"
-cp -f "$VERSION_FILE" "$INSTALL_DIR/VERSION"
-echo "[OK] Server files updated to v$REPO_VERSION"
-
-# --- Create virtual environment ---
-if [ ! -d "$INSTALL_DIR/venv" ]; then
-    echo "Creating virtual environment..."
-    python3 -m venv "$INSTALL_DIR/venv"
+# Check NVIDIA GPU (Linux only)
+if command -v nvidia-smi &> /dev/null; then
+    echo "[OK] NVIDIA GPU detected"
+else
+    echo "[WARN] No NVIDIA GPU. CPU mode will be very slow."
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then exit 1; fi
 fi
-VENV_PY="$INSTALL_DIR/venv/bin/python"
-echo "[OK] Virtual environment ready"
 
-# --- Install Python packages ---
-echo "Installing Python packages from requirements.txt..."
-"$VENV_PY" -m pip install --quiet --upgrade pip
-"$VENV_PY" -m pip install --quiet -r "$REPO_DIR/server/requirements.txt"
-echo "[OK] Python packages installed"
+# Create venv
+if [ ! -d ".venv" ]; then
+    echo "[*] Creating virtual environment..."
+    python3 -m venv .venv
+fi
+source .venv/bin/activate
 
-# --- Download models ---
-echo ""
-echo "Downloading CosyVoice3 ONNX models (~2.9GB)..."
-echo "This may take a while depending on your connection."
-echo ""
+# Upgrade pip
+pip install --upgrade pip --quiet
 
-BASE_URL="https://huggingface.co/ayousanz/cosy-voice3-onnx/resolve/main"
-FILES=(
-    "campplus.onnx"
-    "flow.decoder.estimator.fp16.onnx"
-    "flow_pre_lookahead_fp16.onnx"
-    "flow_speaker_projection_fp16.onnx"
-    "flow_token_embedding_fp16.onnx"
-    "hift_decoder_fp32.onnx"
-    "hift_f0_predictor_fp32.onnx"
-    "hift_source_generator_fp32.onnx"
-    "llm_backbone_decode_fp16.onnx"
-    "llm_backbone_initial_fp16.onnx"
-    "llm_decoder_fp16.onnx"
-    "llm_speech_embedding_fp16.onnx"
-    "speech_tokenizer_v3.onnx"
-    "text_embedding_fp32.onnx"
-    "merges.txt"
-    "vocab.json"
-    "tokenizer_config.json"
-)
+# Install PyTorch
+echo "[*] Installing PyTorch..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    pip install torch torchaudio --quiet  # MPS on macOS
+else
+    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --quiet
+fi
 
-for f in "${FILES[@]}"; do
-    if [ -f "$MODEL_DIR/$f" ]; then
-        echo "  [skip] $f (already exists)"
-    else
-        echo "  [downloading] $f..."
-        curl -sL -o "$MODEL_DIR/$f" "$BASE_URL/$f"
-        echo "  [done] $f"
-    fi
-done
+# Install deps
+echo "[*] Installing dependencies..."
+pip install websockets numpy soundfile librosa huggingface_hub --quiet
+
+# Clone CosyVoice3
+if [ ! -d "CosyVoice" ]; then
+    echo "[*] Cloning CosyVoice3..."
+    git clone --quiet https://github.com/FunAudioLLM/CosyVoice.git
+fi
+cd CosyVoice
+pip install -r requirements.txt --quiet
+cd ..
+
+# Download model
+echo "[*] Downloading model..."
+python3 -c "from huggingface_hub import snapshot_download; snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512', local_dir='models/Fun-CosyVoice3-0.5B-2512')"
 
 echo ""
-echo "=========================================="
-echo " Installation complete! (v$REPO_VERSION)"
-echo "=========================================="
-echo ""
-echo "To start the server, run:"
-echo "  ./install/run_server.sh"
-echo ""
-echo "The server will listen on 127.0.0.1:18766"
-echo "Configure the Chrome extension to connect to localhost:18766"
+echo "============================================"
+echo " Installation complete!"
+echo " Run ./run_server.sh to start."
+echo "============================================"

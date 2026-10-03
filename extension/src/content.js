@@ -1,177 +1,125 @@
-// Ailia TTS — content script v0.2.0 (localhost streaming mode)
-// Watches Muse chat DOM for streaming assistant responses,
-// forwards raw text deltas to background for bi-streaming TTS.
-// No sentence chunking — the TTS server handles streaming.
+// Ailia TTS v3 - Content Script
+// Captures Muse AI's streaming text and forwards to the TTS server.
+const VERSION = '3.0.0';
+console.log(`[ailia-tts] content v${VERSION} loaded`);
 
-(() => {
-  'use strict';
+let currentTurnId = null;
+let lastText = '';
+let observer = null;
 
-  const VERSION = '0.2.0';
-  function log(...args) { console.log('[ailia-tts][content]', ...args); }
-
-  log(`content script v${VERSION} loaded on`, location.href);
-
-  // --- Text sanitization (light) -----------------------------------------
-  // Only strip emojis; keep everything else for the TTS server.
-  const EMOJI_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu;
-
-  function sanitizeText(text) {
-    return text.replace(EMOJI_RE, '').trim();
+function findAssistantMessages() {
+  // Multiple selector strategies, most specific first
+  const strategies = [
+    '[data-hatch-markdown-streaming="true"]',
+    '[data-testid*="assistant"]',
+    'div[class*="assistant"]',
+  ];
+  for (const sel of strategies) {
+    const els = document.querySelectorAll(sel);
+    if (els.length > 0) return els;
   }
+  return [];
+}
 
-  // --- Streaming detection -----------------------------------------------
-  function isAssistantBubble(el) {
-    const cls = el.className || '';
-    if (typeof cls === 'string' && cls.includes('hatch-agent-bubble-bg')) return true;
-    const style = el.getAttribute('style') || '';
-    if (style.includes('hatch-agent-bubble-bg')) return true;
-    return false;
+function extractText(el) {
+  // Exclude code blocks
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let text = '';
+  let node;
+  while ((node = walker.nextNode())) {
+    const parent = node.parentElement;
+    if (parent && (parent.closest('pre') || parent.closest('code'))) continue;
+    text += node.textContent;
   }
+  return text;
+}
 
-  function findStreamingBubble() {
-    const streamingEls = document.querySelectorAll('[data-hatch-markdown-streaming="true"]');
-    for (const se of streamingEls) {
-      let el = se;
-      while (el && el !== document.body) {
-        if (el.classList && el.classList.contains('hatch-chat-groupable-bubble')) {
-          if (isAssistantBubble(el)) return el;
-          break;
-        }
-        el = el.parentElement;
-      }
-    }
-    return null;
+function sendMessage(msg) {
+  chrome.runtime.sendMessage({ ...msg, source: 'content' }).catch(() => {});
+}
+
+function startTurn() {
+  currentTurnId = 'turn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  lastText = '';
+  sendMessage({ type: 'turn_start', turnId: currentTurnId });
+  console.log(`[ailia-tts] turn start: ${currentTurnId}`);
+}
+
+function sendDelta(fullText) {
+  if (fullText === lastText) return;
+  // Simple diff: send only new text
+  let newText = fullText;
+  if (fullText.startsWith(lastText)) {
+    newText = fullText.slice(lastText.length);
+  } else {
+    // Text changed unexpectedly; resync
+    sendMessage({ type: 'text_delta', turnId: currentTurnId, text: fullText, resync: true });
+    lastText = fullText;
+    return;
   }
-
-  let turnCounter = 0;
-  function turnId(el) {
-    if (!el._ailiaTurnId) el._ailiaTurnId = `turn-${++turnCounter}-${Date.now()}`;
-    return el._ailiaTurnId;
+  if (newText) {
+    sendMessage({ type: 'text_delta', turnId: currentTurnId, text: newText });
+    lastText = fullText;
   }
+}
 
-  // Extract speakable text, excluding code blocks.
-  function extractText(el) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        let p = node.parentElement;
-        while (p && p !== el) {
-          const tag = p.tagName;
-          if (tag === 'PRE' || tag === 'CODE') return NodeFilter.FILTER_REJECT;
-          p = p.parentElement;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-    const parts = [];
-    let n;
-    while ((n = walker.nextNode())) {
-      const t = n.textContent.trim();
-      if (t) parts.push(t);
-    }
-    return sanitizeText(parts.join(' ').replace(/\s+/g, ' '));
-  }
+function endTurn() {
+  if (!currentTurnId) return;
+  sendMessage({ type: 'turn_end', turnId: currentTurnId });
+  console.log(`[ailia-tts] turn end: ${currentTurnId}`);
+  currentTurnId = null;
+  lastText = '';
+}
 
-  function forward(type, payload) {
-    chrome.runtime.sendMessage({ source: 'ailia-tts-content', type, ...payload });
-  }
-
-  // --- Turn tracking with text delta streaming ---------------------------
-  let currentTurnId = null;
-  let sentText = '';  // text already forwarded for current turn
-  let settleTimer = null;
-  let streamingBubble = null;
-
-  function onStreamingText(turnEl) {
-    const id = turnId(turnEl);
-    const text = extractText(turnEl);
-    if (!text) return;
-
-    if (id !== currentTurnId) {
-      if (currentTurnId !== null) {
-        log('new turn, ending previous:', currentTurnId);
-        forward('turn_end', { turnId: currentTurnId });
-      }
-      log('turn started:', id);
-      forward('turn_start', { turnId: id });
-      currentTurnId = id;
-      sentText = '';
-    }
-
-    // Send only the new delta
-    if (text.length > sentText.length && text.startsWith(sentText)) {
-      const delta = text.slice(sentText.length);
-      if (delta.trim()) {
-        forward('text_delta', { turnId: id, text: delta });
-        sentText = text;
-      }
-    } else if (!text.startsWith(sentText)) {
-      // Text was edited/rewound — resync by sending full text as delta
-      // (server should handle this as a reset for the turn)
-      log('text resync for turn:', id);
-      forward('text_delta', { turnId: id, text: text, resync: true });
-      sentText = text;
+function checkForStreaming() {
+  const messages = findAssistantMessages();
+  let found = false;
+  for (const el of messages) {
+    const streaming = el.getAttribute('data-hatch-markdown-streaming') === 'true';
+    if (streaming) {
+      found = true;
+      if (!currentTurnId) startTurn();
+      const text = extractText(el);
+      sendDelta(text);
+      // Mark this element as tracked
+      el.dataset.ailiaTracked = '1';
     }
   }
-
-  function onTurnDone(turnEl) {
-    const id = turnId(turnEl);
-    if (id !== currentTurnId) return;
-    // Flush any remaining text
-    const text = extractText(turnEl);
-    if (text.length > sentText.length && text.startsWith(sentText)) {
-      const delta = text.slice(sentText.length);
-      if (delta.trim()) {
-        forward('text_delta', { turnId: id, text: delta });
+  // If we had a turn but no streaming element found, the turn ended
+  if (currentTurnId && !found) {
+    // Double-check: look for tracked elements that are no longer streaming
+    const tracked = document.querySelectorAll('[data-ailia-tracked="1"]');
+    let stillActive = false;
+    for (const el of tracked) {
+      if (el.getAttribute('data-hatch-markdown-streaming') === 'true') {
+        stillActive = true;
+        break;
       }
     }
-    log('turn ended:', id);
-    forward('turn_end', { turnId: id });
-    currentTurnId = null;
-    sentText = '';
-    streamingBubble = null;
+    if (!stillActive) endTurn();
   }
+}
 
-  function scan() {
-    const bubble = findStreamingBubble();
-
-    if (bubble) {
-      if (streamingBubble !== bubble) {
-        if (streamingBubble && currentTurnId !== null) {
-          onTurnDone(streamingBubble);
-        }
-        streamingBubble = bubble;
-        log('streaming started for bubble');
-      }
-      clearTimeout(settleTimer);
-      onStreamingText(bubble);
-      settleTimer = setTimeout(() => {
-        const stillStreaming = bubble.querySelector('[data-hatch-markdown-streaming="true"]');
-        if (!stillStreaming && streamingBubble === bubble) {
-          log('streaming ended, finalizing');
-          onTurnDone(bubble);
-        }
-      }, 1500);
-    } else {
-      if (streamingBubble && currentTurnId !== null) {
-        log('streaming bubble gone, finalizing');
-        clearTimeout(settleTimer);
-        onTurnDone(streamingBubble);
-      }
-    }
-  }
-
-  const observer = new MutationObserver(() => scan());
-  observer.observe(document.documentElement, {
+function init() {
+  observer = new MutationObserver(() => checkForStreaming());
+  observer.observe(document.body, {
     childList: true,
     subtree: true,
     characterData: true,
-    attributes: true,
-    attributeFilter: ['data-hatch-markdown-streaming'],
   });
+  checkForStreaming();
+  console.log('[ailia-tts] content script ready');
+}
 
-  window.addEventListener('beforeunload', () => {
-    if (currentTurnId !== null) forward('cancel', { turnId: currentTurnId });
-  });
+// Cancel on navigation
+window.addEventListener('beforeunload', () => {
+  if (currentTurnId) {
+    sendMessage({ type: 'cancel', turnId: currentTurnId });
+  }
+});
 
-  log('content script ready — streaming text deltas (no chunking)');
-})();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
