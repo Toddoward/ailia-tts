@@ -69,6 +69,10 @@ class CosyVoice3Streaming:
         log.info("Loading ONNX models...")
         so = ort.SessionOptions()
         so.log_severity_level = 3
+        # NOTE: ORT_ENABLE_ALL's extended fusions (e.g. SimplifiedLayerNormFusion)
+        # crash on the fp16 CosyVoice3 backbone. BASIC keeps constant folding
+        # without the problematic fusions.
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
         providers = ['CPUExecutionProvider']
         d = str(self.model_dir)
         def load(name):
