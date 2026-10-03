@@ -51,11 +51,11 @@ if [ ! -d "CosyVoice" ]; then
     git clone --quiet https://github.com/FunAudioLLM/CosyVoice.git
 fi
 cd CosyVoice
-echo "[*] Installing CosyVoice3 requirements..."
-if ! pip install -r requirements.txt --quiet; then
-    echo "[WARN] Some deps failed. Installing minimal set (whisper not needed for TTS)..."
-    pip install --quiet torch torchaudio transformers librosa soundfile numpy
-fi
+echo "[*] Installing minimal CosyVoice3 inference deps (skipping whisper/ASR)..."
+pip install --quiet transformers librosa soundfile numpy || {
+    echo "[ERROR] CosyVoice3 deps failed"
+    exit 1
+}
 cd ..
 
 # Download model

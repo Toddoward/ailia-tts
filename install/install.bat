@@ -74,11 +74,12 @@ if not exist "CosyVoice" (
     )
 )
 cd CosyVoice
-echo [*] Installing CosyVoice3 requirements (this may take a while)...
-pip install -r requirements.txt
+echo [*] Installing minimal CosyVoice3 inference deps (skipping whisper/ASR, not needed for TTS)...
+pip install transformers librosa soundfile numpy --quiet
 if errorlevel 1 (
-    echo [WARN] Some CosyVoice3 deps failed. Trying without whisper (not needed for TTS)...
-    pip install --quiet torch torchaudio transformers librosa soundfile numpy
+    echo [ERROR] CosyVoice3 deps install failed
+    pause
+    exit /b 1
 )
 cd ..
 
