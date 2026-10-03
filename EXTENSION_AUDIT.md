@@ -1,7 +1,7 @@
 # Extension v3 Status Audit (2026-10-04)
 
 ## Summary
-Extension v3.0.0 is in a **broken, non-loadable state**.
+Extension v0.2.6 is in a **broken, non-loadable state**.
 
 ## Missing Files (Critical)
 1. **extension/src/popup.html** - Referenced in manifest.json as `default_popup`, DOES NOT EXIST
@@ -14,11 +14,11 @@ Extension v3.0.0 is in a **broken, non-loadable state**.
    - Impact: Extension will show default icon (minor)
 
 ## Existing Files
-- extension/src/background.js (v3.0.0) - EXISTS, routes messages to offscreen
-- extension/src/content.js (v3.0.0) - EXISTS, captures Muse DOM text
+- extension/src/background.js (v0.2.6) - EXISTS, routes messages to offscreen
+- extension/src/content.js (v0.2.6) - EXISTS, captures Muse DOM text
 - extension/src/offscreen.html - EXISTS
-- extension/src/offscreen.js (v3.0.0) - EXISTS, WebSocket + audio playback
-- extension/manifest.json (v3.0.0) - EXISTS, references missing popup.html
+- extension/src/offscreen.js (v0.2.6) - EXISTS, WebSocket + audio playback
+- extension/manifest.json (v0.2.6) - EXISTS, references missing popup.html
 
 ## Test Handler Status
 - **background.js**: No `test_audio` / `test_text` message handlers

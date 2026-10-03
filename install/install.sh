@@ -62,10 +62,6 @@ pip install --quiet --no-build-isolation openai-whisper || {
     echo "[ERROR] Whisper install failed"
     exit 1
 }
-echo "[*] Installing onnxruntime-gpu (CUDA acceleration)..."
-pip install --quiet onnxruntime-gpu || {
-    echo "[WARN] onnxruntime-gpu install failed, continuing with CPU version"
-}
 cd ..
 
 # Download model

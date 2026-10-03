@@ -1,6 +1,6 @@
 // Ailia TTS v3 - Offscreen Document
 // Owns the WebSocket connection and audio playback.
-const VERSION = '3.0.0';
+const VERSION = '0.2.6';
 console.log(`[ailia-tts] offscreen v${VERSION}`);
 
 const WS_URL = 'ws://127.0.0.1:18766';

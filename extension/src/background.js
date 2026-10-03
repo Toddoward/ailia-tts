@@ -1,6 +1,6 @@
 // Ailia TTS v3 - Background Service Worker
 // Routes messages between content script, popup, and offscreen document.
-const VERSION = '3.0.0';
+const VERSION = '0.2.6';
 console.log(`[ailia-tts] background v${VERSION}`);
 
 let creatingOffscreen = null;

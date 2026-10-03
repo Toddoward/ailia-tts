@@ -1,6 +1,6 @@
 // Ailia TTS v3 - Content Script
 // Captures Muse AI's streaming text and forwards to the TTS server.
-const VERSION = '3.0.0';
+const VERSION = '0.2.6';
 console.log(`[ailia-tts] content v${VERSION} loaded`);
 
 let currentTurnId = null;

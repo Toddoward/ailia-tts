@@ -94,11 +94,6 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo [*] Installing onnxruntime-gpu (CUDA acceleration)...
-pip install onnxruntime-gpu --quiet
-if errorlevel 1 (
-    echo [WARN] onnxruntime-gpu install failed, continuing with CPU version
-)
 cd ..
 
 REM Download model

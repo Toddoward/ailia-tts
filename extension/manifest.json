@@ -1,1 +1,33 @@
-{"action":{"default_popup":"src/popup.html","default_title":"Ailia TTS"},"background":{"service_worker":"src/background.js"},"content_scripts":[{"js":["src/content.js"],"matches":["https://claude.ai/*","https://*.anthropic.com/*"],"run_at":"document_idle"}],"description":"Real-time voice for Muse AI responses","host_permissions":["https://claude.ai/*","https://*.anthropic.com/*"],"manifest_version":3,"name":"Ailia TTS","permissions":["offscreen","storage"],"version":"3.0.0"}
+{
+    "action": {
+        "default_popup": "src/popup.html",
+        "default_title": "Ailia TTS"
+    },
+    "background": {
+        "service_worker": "src/background.js"
+    },
+    "content_scripts": [
+        {
+            "js": [
+                "src/content.js"
+            ],
+            "matches": [
+                "https://claude.ai/*",
+                "https://*.anthropic.com/*"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "description": "Real-time voice for Muse AI responses",
+    "host_permissions": [
+        "https://claude.ai/*",
+        "https://*.anthropic.com/*"
+    ],
+    "manifest_version": 3,
+    "name": "Ailia TTS",
+    "permissions": [
+        "offscreen",
+        "storage"
+    ],
+    "version": "0.2.6"
+}
