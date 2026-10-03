@@ -1,0 +1,5 @@
+# Ailia TTS v3 - Server direct dependencies
+# Heavy deps (torch, torchaudio, cosyvoice) are installed by install.sh/install.bat
+websockets>=12.0
+numpy>=1.24
+soundfile>=0.12
