@@ -89,51 +89,132 @@ class CosyVoice3Streaming:
         self.flow_pre_lookahead = load('flow_pre_lookahead_fp16.onnx')
         self.flow_speaker_projection = load('flow_speaker_projection_fp16.onnx')
         self.flow_decoder = load('flow.decoder.estimator.fp16.onnx')
+        self.hift_f0_predictor = load('hift_f0_predictor_fp32.onnx')
+        self.hift_source_generator = load('hift_source_generator_fp32.onnx')
         self.hift_decoder = load('hift_decoder_fp32.onnx')
         log.info("All models loaded!")
 
     def _prepare_prompt(self):
         log.info("Preparing voice prompt...")
         import librosa
-        import soundfile as sf
-        wav, sr = sf.read(str(PROMPT_WAV))
-        if sr != 16000:
-            wav = librosa.resample(wav, orig_sr=sr, target_sr=16000)
-        mel = librosa.feature.melspectrogram(y=wav, sr=16000, n_mels=80)
-        mel = np.log(mel + 1e-6).T[np.newaxis, :, :].astype(np.float32)
-        self.prompt_embedding = self.campplus.run(None, {'input': mel})[0]
+        self.prompt_embedding = self._extract_speaker_embedding(str(PROMPT_WAV))
+        self.prompt_speech_tokens = self._extract_speech_tokens(str(PROMPT_WAV))
+        self.prompt_mel = self._extract_speech_mel(str(PROMPT_WAV))
         self.prompt_text = PROMPT_TEXT
-        log.info("Voice prompt ready")
+        log.info(f"Voice prompt ready (emb={self.prompt_embedding.shape}, "
+                 f"tokens={self.prompt_speech_tokens.shape}, mel={self.prompt_mel.shape})")
+
+    def _extract_speaker_embedding(self, audio_path: str) -> np.ndarray:
+        import librosa
+        audio, _ = librosa.load(audio_path, sr=16000)
+        audio = audio.astype(np.float32)
+        mel = librosa.feature.melspectrogram(
+            y=audio, sr=16000, n_fft=400, hop_length=160,
+            n_mels=80, fmin=20, fmax=7600)
+        log_mel = np.log(np.maximum(mel, 1e-10)).T
+        log_mel = log_mel - log_mel.mean(axis=0, keepdims=True)
+        feat = log_mel[np.newaxis, :, :].astype(np.float32)
+        input_name = self.campplus.get_inputs()[0].name
+        embedding = self.campplus.run(None, {input_name: feat})[0]
+        return embedding.flatten()[np.newaxis, :].astype(np.float32)
+
+    def _extract_speech_tokens(self, audio_path: str) -> np.ndarray:
+        import librosa
+        audio, _ = librosa.load(audio_path, sr=16000)
+        audio = audio.astype(np.float32)
+        mel = librosa.feature.melspectrogram(
+            y=audio, sr=16000, n_fft=400, hop_length=160,
+            n_mels=128, fmin=0, fmax=8000)
+        log_mel = np.log10(np.maximum(mel, 1e-10))
+        log_mel = np.maximum(log_mel, log_mel.max() - 8.0)
+        log_mel = (log_mel + 4.0) / 4.0
+        feat = log_mel[np.newaxis, :, :].astype(np.float32)
+        feat_len = np.array([feat.shape[2]], dtype=np.int32)
+        input_names = [inp.name for inp in self.speech_tokenizer.get_inputs()]
+        tokens = self.speech_tokenizer.run(None, {
+            input_names[0]: feat,
+            input_names[1]: feat_len,
+        })[0]
+        return np.array(tokens, dtype=np.int64).reshape(1, -1)
+
+    def _extract_speech_mel(self, audio_path: str) -> np.ndarray:
+        import librosa
+        audio, _ = librosa.load(audio_path, sr=24000)
+        audio = audio.astype(np.float32)
+        mel = librosa.feature.melspectrogram(
+            y=audio, sr=24000, n_fft=1024, hop_length=256,
+            n_mels=80, fmin=0, fmax=12000)
+        log_mel = np.log(np.maximum(mel, 1e-10))
+        return log_mel.T[np.newaxis, :, :].astype(np.float32)
+
+    def _log_softmax(self, x: np.ndarray) -> np.ndarray:
+        e = x - np.max(x)
+        return e - np.log(np.sum(np.exp(e)))
+
+    def _softmax(self, x: np.ndarray) -> np.ndarray:
+        e = np.exp(x - np.max(x))
+        return e / e.sum()
+
+    def get_text_embedding(self, token_ids: np.ndarray) -> np.ndarray:
+        return self.text_embedding.run(
+            None, {'input_ids': token_ids.astype(np.int64)})[0]
+
+    def get_speech_embedding(self, token_ids: np.ndarray) -> np.ndarray:
+        return self.llm_speech_embedding.run(
+            None, {'token': token_ids.astype(np.int64)})[0]
 
     def tokenize_text(self, text: str) -> np.ndarray:
         return np.array([self.tokenizer.encode(text, add_special_tokens=False)], dtype=np.int64)
 
     def synthesize(self, text: str) -> np.ndarray:
         """Synthesize text to int16 audio at 24kHz (blocking)."""
-        # LLM: text -> speech tokens
+        speech_tokens = self._llm_inference(text)
+        mel = self._flow_inference(
+            speech_tokens,
+            self.prompt_embedding,
+            prompt_tokens=self.prompt_speech_tokens,
+            prompt_mel=self.prompt_mel,
+        )
+        audio = self._hift_inference(mel)
+        audio = np.clip(audio.squeeze(), -0.99, 0.99)
+        return (audio * 32767).astype(np.int16)
+
+    def _llm_inference(self, text: str, sampling_k: int = 25,
+                       max_len: int = 500, min_len: int = 10) -> np.ndarray:
+        """Generate speech tokens (zero-shot mode with prompt)."""
         pt = self.tokenize_text(self.prompt_text)
         tt = self.tokenize_text(text)
         combined = np.concatenate([pt, tt], axis=1)
-        text_emb = self.text_embedding.run(None, {'input_ids': combined.astype(np.int64)})[0]
-        sos_emb = self.llm_speech_embedding.run(None, {'token': np.array([[self.sos]], dtype=np.int64)})[0]
-        task_emb = self.llm_speech_embedding.run(None, {'token': np.array([[self.task_id]], dtype=np.int64)})[0]
-        lm_input = np.concatenate([sos_emb, text_emb, task_emb], axis=1).astype(np.float32)
+        text_emb = self.get_text_embedding(combined)
+        sos_emb = self.get_speech_embedding(np.array([[self.sos]], dtype=np.int64))
+        task_emb = self.get_speech_embedding(np.array([[self.task_id]], dtype=np.int64))
+        if self.prompt_speech_tokens is not None and self.prompt_speech_tokens.shape[1] > 0:
+            prompt_speech_emb = self.get_speech_embedding(self.prompt_speech_tokens)
+        else:
+            prompt_speech_emb = np.zeros((1, 0, self.hidden_dim), dtype=np.float32)
+        lm_input = np.concatenate(
+            [sos_emb, text_emb, task_emb, prompt_speech_emb], axis=1).astype(np.float32)
+
         seq_len = lm_input.shape[1]
         attn = np.ones((1, seq_len), dtype=np.float32)
-        out = self.llm_backbone_initial.run(None, {'inputs_embeds': lm_input, 'attention_mask': attn})
+        out = self.llm_backbone_initial.run(
+            None, {'inputs_embeds': lm_input, 'attention_mask': attn})
         hidden, past_kv = out[0], (out[1] if len(out) > 1 else None)
         logits = self.llm_decoder.run(None, {'hidden_state': hidden[:, -1:, :]})[0]
 
         tts_len = tt.shape[1]
-        max_len = min(500, tts_len * 20)
-        min_len = max(10, tts_len * 2)
+        max_len = min(max_len, tts_len * 20)
+        min_len = max(min_len, tts_len * 2)
         tokens = []
         for i in range(max_len):
-            tok = int(np.argmax(logits.squeeze()))
+            logp = self._log_softmax(logits.squeeze())
+            top_k_idx = np.argsort(logp)[-sampling_k:]
+            top_k_probs = self._softmax(logp[top_k_idx])
+            tok = int(top_k_idx[np.random.choice(len(top_k_idx), p=top_k_probs)])
             if tok == self.eos_token and i >= min_len:
                 break
             tokens.append(tok)
-            emb = self.llm_speech_embedding.run(None, {'token': np.array([[tok]], dtype=np.int64)})[0]
+            emb = self.get_speech_embedding(np.array([[tok]], dtype=np.int64))
             attn = np.ones((1, seq_len + len(tokens)), dtype=np.float32)
             inp = {'inputs_embeds': emb.astype(np.float32), 'attention_mask': attn}
             if past_kv is not None:
@@ -145,24 +226,118 @@ class CosyVoice3Streaming:
             logits = self.llm_decoder.run(None, {'hidden_state': hidden})[0]
 
         log.info(f"  Generated {len(tokens)} speech tokens")
-        speech_tokens = np.array([tokens], dtype=np.int64)
+        return np.array([tokens], dtype=np.int64)
 
-        # Flow: tokens -> mel
-        emb = self.prompt_embedding
-        emb_norm = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-8)
-        spks = self.flow_speaker_projection.run(None, {'embedding': emb_norm.astype(np.float32)})[0]
-        tok_emb = self.flow_token_embedding.run(None, {'token': speech_tokens.astype(np.int64)})[0]
-        h = self.flow_pre_lookahead.run(None, {'token_embedded': tok_emb.astype(np.float32)})[0]
-        mel = self.flow_decoder.run(None, {
-            'x': np.random.randn(1, 80, h.shape[1] * 2).astype(np.float32),
-            'spks': spks.astype(np.float32),
-            'h': h.astype(np.float32),
-        })[0]
+    def _flow_inference(self, speech_tokens: np.ndarray, embedding: np.ndarray,
+                        prompt_tokens: np.ndarray = None,
+                        prompt_mel: np.ndarray = None,
+                        n_timesteps: int = 10) -> np.ndarray:
+        """Speech tokens -> mel via conditional flow matching (Euler solver)."""
+        from scipy.ndimage import zoom
+        emb_norm = embedding / (np.linalg.norm(embedding, axis=1, keepdims=True) + 1e-8)
+        spks = self.flow_speaker_projection.run(
+            None, {'embedding': emb_norm.astype(np.float32)})[0]
 
-        # HiFT: mel -> audio
-        audio = self.hift_decoder.run(None, {'mel': mel.astype(np.float32)})[0]
-        audio = np.clip(audio.squeeze(), -1, 1)
-        return (audio * 32767).astype(np.int16)
+        if prompt_tokens is not None and prompt_tokens.shape[1] > 0:
+            all_tokens = np.concatenate([prompt_tokens, speech_tokens], axis=1)
+            prompt_token_len = prompt_tokens.shape[1]
+        else:
+            all_tokens = speech_tokens
+            prompt_token_len = 0
+
+        token_embedded = self.flow_token_embedding.run(
+            None, {'token': all_tokens.astype(np.int64)})[0]
+        h = self.flow_pre_lookahead.run(
+            None, {'token_embedded': token_embedded.astype(np.float32)})[0]
+
+        token_mel_ratio = 2
+        mel_len = h.shape[1]
+        if prompt_tokens is not None and prompt_token_len > 0:
+            mel_len1 = prompt_token_len * token_mel_ratio
+        else:
+            mel_len1 = 0
+
+        conds = np.zeros((1, 80, mel_len), dtype=np.float32)
+        if prompt_mel is not None and prompt_mel.shape[1] > 0 and mel_len1 > 0:
+            prompt_mel_t = prompt_mel.transpose(0, 2, 1)
+            src_len = prompt_mel_t.shape[2]
+            if src_len != mel_len1:
+                prompt_mel_t = zoom(prompt_mel_t, (1, 1, mel_len1 / src_len), order=1)
+            conds[:, :, :mel_len1] = prompt_mel_t[:, :, :mel_len1]
+
+        mu = h.transpose(0, 2, 1).astype(np.float32)
+        mask = np.ones((1, 1, mel_len), dtype=np.float32)
+        x = np.random.randn(1, 80, mel_len).astype(np.float32)
+
+        x_b = np.concatenate([x, x], axis=0)
+        mask_b = np.concatenate([mask, mask], axis=0)
+        mu_b = np.concatenate([mu, mu], axis=0)
+        spks_b = np.concatenate([spks, spks], axis=0)
+        conds_b = np.concatenate([conds, conds], axis=0)
+
+        log.info(f"  Flow: {n_timesteps} steps (mel_len={mel_len}, prompt={mel_len1})")
+        dt = 1.0 / n_timesteps
+        for step in range(n_timesteps):
+            t = np.array([step / n_timesteps, step / n_timesteps], dtype=np.float32)
+            velocity = self.flow_decoder.run(None, {
+                'x': x_b, 'mask': mask_b, 'mu': mu_b,
+                't': t, 'spks': spks_b, 'cond': conds_b,
+            })[0]
+            x_b = x_b + velocity * dt
+
+        mel = x_b[:1]
+        if mel_len1 > 0:
+            mel = mel[:, :, mel_len1:]
+        return mel.astype(np.float32)
+
+    def _stift(self, x: np.ndarray, n_fft: int = 16, hop_len: int = 4) -> tuple:
+        from scipy.signal import get_window
+        window = get_window("hann", n_fft, fftbins=True).astype(np.float32)
+        x = x.astype(np.float32)
+        pad = n_fft // 2
+        x = np.pad(x, (pad, pad), mode='reflect')
+        n_frames = 1 + (len(x) - n_fft) // hop_len
+        n_freqs = n_fft // 2 + 1
+        real = np.zeros((n_freqs, n_frames), dtype=np.float32)
+        imag = np.zeros((n_freqs, n_frames), dtype=np.float32)
+        for i in range(n_frames):
+            frame = x[i * hop_len:i * hop_len + n_fft] * window
+            spec = np.fft.rfft(frame)
+            real[:, i] = np.real(spec)
+            imag[:, i] = np.imag(spec)
+        return real, imag
+
+    def _istft(self, magnitude: np.ndarray, phase: np.ndarray,
+               n_fft: int = 16, hop_len: int = 4) -> np.ndarray:
+        from scipy.signal import get_window
+        window = get_window("hann", n_fft, fftbins=True).astype(np.float32)
+        magnitude = np.clip(magnitude, a_min=None, a_max=100.0)
+        spec = magnitude * np.exp(1j * phase)
+        n_frames = spec.shape[1]
+        out_len = n_fft + (n_frames - 1) * hop_len
+        audio = np.zeros(out_len, dtype=np.float32)
+        wsum = np.zeros(out_len, dtype=np.float32)
+        for i in range(n_frames):
+            frame = np.fft.irfft(spec[:, i], n=n_fft).astype(np.float32)
+            s = i * hop_len
+            audio[s:s + n_fft] += frame * window
+            wsum[s:s + n_fft] += window ** 2
+        return (audio / np.maximum(wsum, 1e-8)).astype(np.float32)
+
+    def _hift_inference(self, mel: np.ndarray) -> np.ndarray:
+        """Mel -> waveform via HiFT vocoder."""
+        f0 = self.hift_f0_predictor.run(None, {'mel': mel.astype(np.float32)})[0]
+        f0_input = f0[:, np.newaxis, :].astype(np.float32)
+        source = self.hift_source_generator.run(None, {'f0': f0_input})[0]
+        stft_r, stft_i = self._stift(source.squeeze(), n_fft=16, hop_len=4)
+        source_stft = np.concatenate([stft_r, stft_i], axis=0)[np.newaxis, :, :]
+        outputs = self.hift_decoder.run(None, {
+            'mel': mel.astype(np.float32),
+            'source_stft': source_stft.astype(np.float32),
+        })
+        magnitude, phase = outputs[0], outputs[1]
+        audio = self._istft(magnitude.squeeze(0), phase.squeeze(0), n_fft=16, hop_len=4)
+        return np.clip(audio, -0.99, 0.99).astype(np.float32)
 
 
 class StreamingServer:

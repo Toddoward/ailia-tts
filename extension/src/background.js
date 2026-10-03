@@ -8,6 +8,7 @@ const DEFAULT_WS_URL = 'ws://127.0.0.1:18766';
 
 let settings = null;
 let offscreenReady = false;
+let creatingOffscreen = null;
 const pendingToOffscreen = [];
 
 function log(...args) { console.log('[ailia-tts][bg]', ...args); }
@@ -27,13 +28,28 @@ async function ensureOffscreen() {
   let exists = false;
   try { exists = await chrome.offscreen.hasDocument(); } catch (_) {}
   if (exists) return;
+  if (creatingOffscreen) {
+    // Another call is already creating it; wait for it.
+    await creatingOffscreen;
+    return;
+  }
   log('creating offscreen document');
   offscreenReady = false;
-  await chrome.offscreen.createDocument({
-    url: 'src/offscreen.html',
-    reasons: ['AUDIO_PLAYBACK'],
-    justification: 'Play TTS audio and hold the streaming WebSocket',
-  });
+  creatingOffscreen = (async () => {
+    try {
+      await chrome.offscreen.createDocument({
+        url: 'src/offscreen.html',
+        reasons: ['AUDIO_PLAYBACK'],
+        justification: 'Play TTS audio and hold the streaming WebSocket',
+      });
+    } catch (e) {
+      // "Only a single offscreen document may be created" — someone beat us.
+      warn('offscreen create:', e.message);
+    } finally {
+      creatingOffscreen = null;
+    }
+  })();
+  await creatingOffscreen;
 }
 
 function pushConfigToOffscreen() {
