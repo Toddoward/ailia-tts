@@ -74,4 +74,52 @@ $('enabled').addEventListener('change', async () => {
   s.enabled = $('enabled').checked;
   updateStatus(s);
 });
+
+// --- Streaming tests -------------------------------------------------------
+
+function showTestStatus(text, ok) {
+  const el = $('testStatus');
+  el.style.display = 'block';
+  el.textContent = text;
+  el.className = 'status ' + (ok === true ? 'ok' : ok === false ? 'err' : '');
+}
+
+$('testAudio').addEventListener('click', async () => {
+  const text = $('testText').value.trim();
+  showTestStatus('🔊 서버에 오디오 생성 요청 중...');
+  try {
+    const res = await chrome.runtime.sendMessage({
+      source: 'ailia-tts-popup',
+      type: 'test_audio',
+      text: text || undefined,
+    });
+    if (res && res.ok) {
+      showTestStatus('🔊 서버가 합성 중... 잠시 후 재생됩니다.', null);
+    } else {
+      showTestStatus('❌ 요청 실패: ' + ((res && res.error) || 'unknown'), false);
+    }
+  } catch (e) {
+    showTestStatus('❌ 오류: ' + e.message, false);
+  }
+});
+
+$('testText').addEventListener('click', async () => {
+  const text = $('testText').value.trim() || '안녕하세요, 주인님! 에일리아 음성 테스트 중이에요.';
+  showTestStatus('📝 텍스트 스트리밍 전송 중... (서버 로그 확인)');
+  try {
+    const res = await chrome.runtime.sendMessage({
+      source: 'ailia-tts-popup',
+      type: 'test_text',
+      text,
+    });
+    if (res && res.ok) {
+      showTestStatus('📝 전송 완료! 서버 로그에서 수신을 확인하세요.', true);
+    } else {
+      showTestStatus('❌ 요청 실패: ' + ((res && res.error) || 'unknown'), false);
+    }
+  } catch (e) {
+    showTestStatus('❌ 오류: ' + e.message, false);
+  }
+});
+
 load();

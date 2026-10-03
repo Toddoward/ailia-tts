@@ -38,6 +38,16 @@
   <button id="save">저장</button>
   <button id="test" style="background:#059669">연결 테스트</button>
 
+  <h1 style="margin-top:16px">🧪 스트리밍 테스트</h1>
+
+  <label for="testText">테스트 문장</label>
+  <input id="testText" placeholder="비워두면 기본 문장 사용" value="안녕하세요, 주인님! 에일리아 음성 테스트 중이에요.">
+  <div class="hint">서버 로그에서 수신 확인, 오디오는 여기서 재생</div>
+
+  <button id="testAudio" style="background:#2563eb">🔊 오디오 스트리밍 테스트<br><span style="font-size:11px;font-weight:400">서버 → 확장 (합성+재생)</span></button>
+  <button id="testText" style="background:#d97706">📝 텍스트 스트리밍 테스트<br><span style="font-size:11px;font-weight:400">확장 → 서버 (전송 확인)</span></button>
+  <div class="status" id="testStatus" style="display:none"></div>
+
 <script src="popup.js"></script>
 </body>
 </html>

@@ -210,6 +210,38 @@ chrome.runtime.onMessage.addListener((msg) => {
 
   if (msg.source !== 'ailia-tts-bg') return;
 
+  if (msg.type === 'test_audio') {
+    // Ask the server to synthesize (default or custom test sentence)
+    // and stream the audio back for playback.
+    const turnId = `test-audio-${Date.now()}`;
+    log('test_audio requested, turn:', turnId);
+    const out = { type: 'test_audio', turnId };
+    if (msg.text) out.text = msg.text;
+    sendToServer(out);
+    return;
+  }
+
+  if (msg.type === 'test_text') {
+    // Stream a test sentence to the server in small chunks with delays,
+    // simulating real token streaming. Server logs receipt.
+    const text = msg.text || 'test';
+    const turnId = `test-text-${Date.now()}`;
+    log('test_text requested, turn:', turnId, `(${text.length} chars)`);
+    sendToServer({ type: 'turn_start', turnId, voice: VOICE });
+    // Split into ~8 char chunks, 120ms apart
+    const chunks = [];
+    for (let i = 0; i < text.length; i += 8) chunks.push(text.slice(i, i + 8));
+    chunks.forEach((chunk, i) => {
+      setTimeout(() => {
+        sendToServer({ type: 'text_delta', turnId, text: chunk });
+        if (i === chunks.length - 1) {
+          setTimeout(() => sendToServer({ type: 'turn_end', turnId }), 150);
+        }
+      }, i * 120);
+    });
+    return;
+  }
+
   if (msg.type === 'turn_start') {
     sendToServer({ type: 'turn_start', turnId: msg.turnId, voice: VOICE });
   } else if (msg.type === 'text_delta') {

@@ -39,6 +39,7 @@ MODEL_DIR = BASE_DIR / "models"
 SAMPLE_RATE = 24000
 PROMPT_WAV = BASE_DIR / "ailia_prompt.wav"
 PROMPT_TEXT = "안녕하세요, 저는 에일리아예요. 주인님을 위해 목소리를 내고 있어요."
+TEST_SENTENCE = "안녕하세요, 주인님! 에일리아 음성 테스트 중이에요. 서버에서 직접 합성한 오디오가 잘 들리시나요?"
 
 executor = ThreadPoolExecutor(max_workers=2)
 
@@ -385,6 +386,20 @@ class StreamingServer:
             log.error(f"Synthesis error: {e}")
             await ws.send(json.dumps({"type": "error", "turnId": turn_id, "message": str(e)}))
 
+    async def _test_audio_task(self, ws, turn_id: str, text: str):
+        """Popup test: synthesize test sentence and stream it back."""
+        try:
+            await self.synthesize_and_stream(ws, turn_id, text)
+            await ws.send(json.dumps({"type": "turn_done", "turnId": turn_id}))
+            self.turns.pop(turn_id, None)
+            log.info(f"Test audio done: {turn_id}")
+        except Exception as e:
+            log.error(f"Test audio error: {e}")
+            try:
+                await ws.send(json.dumps({"type": "error", "turnId": turn_id, "message": str(e)}))
+            except Exception:
+                pass
+
     async def handle_client(self, ws):
         log.info(f"Client: {ws.remote_address}")
         try:
@@ -424,6 +439,8 @@ class StreamingServer:
             turn = self.turns.get(turn_id)
             if not turn or turn["cancelled"]:
                 return
+            if turn_id.startswith("test-text-"):
+                log.info(f"Test text received ({len(turn['buffer'])}ch): {turn['buffer'][:80]}")
             if turn["buffer"].strip():
                 await self.synthesize_and_stream(ws, turn_id, turn["buffer"].strip())
             await ws.send(json.dumps({"type": "turn_done", "turnId": turn_id}))
@@ -434,6 +451,12 @@ class StreamingServer:
             if turn:
                 turn["cancelled"] = True
             self.turns.pop(turn_id, None)
+        elif mtype == "test_audio":
+            # Extension popup test: synthesize a test sentence and stream it back.
+            text = msg.get("text") or TEST_SENTENCE
+            log.info(f"Test audio requested (turn={turn_id}): {text[:60]}")
+            self.turns[turn_id] = {"buffer": "", "seq": 0, "cancelled": False}
+            asyncio.create_task(self._test_audio_task(ws, turn_id, text))
 
     async def run(self, host="127.0.0.1", port=18766):
         await self.load()

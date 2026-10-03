@@ -106,6 +106,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 
+  // Popup test requests: route to offscreen, reply with ack
+  if (msg.source === 'ailia-tts-popup' && (msg.type === 'test_audio' || msg.type === 'test_text')) {
+    (async () => {
+      try {
+        await loadSettings();
+        pushConfigToOffscreen();
+        await routeToOffscreen(msg);
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    })();
+    return true; // keep channel open for async sendResponse
+  }
+
   if (msg.source !== 'ailia-tts-content') return;
 
   (async () => {
