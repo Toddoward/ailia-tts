@@ -3,6 +3,3 @@ __pycache__/
 *.pyo
 .DS_Store
 Thumbs.db
-.env
-.venv/*
-resources/*

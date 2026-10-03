@@ -26,7 +26,7 @@ Chrome 확장 (오디오 재생)
 - 한국어/영어 포함 9개 언어
 - 감정/스타일 제어 (instruct)
 
-### 2. Chrome 확장 (`extension/` — v0.2.1)
+### 2. Chrome 확장 (`extension/` — v0.2.2)
 - `src/content.js` — DOM 관측, 텍스트 델타 스트리밍 (청킹 없음!)
 - `src/background.js` — localhost WebSocket 직접 연결
 - `src/offscreen.js` — 오디오 재생
@@ -37,6 +37,11 @@ Chrome 확장 (오디오 재생)
 - `run_server.sh` / `run_server.bat` — **서버 실행 (권장)**
   - 미설치 시 자동으로 install 실행
   - 레포 버전이 설치된 버전보다 새로우면 자동 업데이트 후 실행
+  - 실행 전 `server/requirements.txt` 기준으로 패키지 검증 (부족하면 자동 설치)
+
+### 4. Python 의존성 (`server/requirements.txt`)
+- `onnxruntime`, `numpy`, `websockets`, `transformers`, `librosa`, `soundfile`
+- install과 run_server 모두 이 파일을 기준으로 설치/검증합니다
 
 ## 빠른 시작
 

@@ -68,6 +68,21 @@ if "%NEED_INSTALL%"=="1" (
     echo.
 )
 
+REM --- Ensure Python requirements (idempotent: skips satisfied packages) ---
+set REQ_FILE=%REPO_DIR%\server\requirements.txt
+if not exist "%REQ_FILE%" set REQ_FILE=%INSTALL_DIR%\requirements.txt
+if exist "%REQ_FILE%" (
+    echo [INFO] Verifying Python packages...
+    "%VENV_PY%" -m pip install --quiet -r "%REQ_FILE%"
+    if errorlevel 1 (
+        echo [WARN] Some packages may not have installed cleanly. Continuing anyway...
+    ) else (
+        echo [OK] Python packages verified.
+    )
+) else (
+    echo [WARN] requirements.txt not found, skipping package check.
+)
+
 REM --- Start server ---
 echo ==========================================
 echo  Starting Ailia TTS server (v%REPO_VERSION%)

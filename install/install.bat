@@ -44,6 +44,7 @@ echo [OK] Install directory: %INSTALL_DIR%
 REM --- Copy server files (always refresh to repo version) ---
 echo Copying server files...
 copy /Y "%REPO_DIR%\server\tts_streaming_server.py" "%INSTALL_DIR%\" >nul
+copy /Y "%REPO_DIR%\server\requirements.txt" "%INSTALL_DIR%\" >nul
 copy /Y "%REPO_DIR%\server\ailia_prompt.wav" "%INSTALL_DIR%\" >nul
 copy /Y "%REPO_DIR%\server\prompt_info.txt" "%INSTALL_DIR%\" >nul
 copy /Y "%VERSION_FILE%" "%INSTALL_DIR%\VERSION" >nul
@@ -58,9 +59,9 @@ set VENV_PY=%INSTALL_DIR%\venv\Scripts\python.exe
 echo [OK] Virtual environment ready
 
 REM --- Install Python packages ---
-echo Installing Python packages...
+echo Installing Python packages from requirements.txt...
 "%VENV_PY%" -m pip install --quiet --upgrade pip
-"%VENV_PY%" -m pip install --quiet onnxruntime numpy websockets soundfile
+"%VENV_PY%" -m pip install --quiet -r "%REPO_DIR%\server\requirements.txt"
 echo [OK] Python packages installed
 
 REM --- Download models ---

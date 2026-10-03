@@ -64,6 +64,22 @@ if [ "$NEED_INSTALL" -eq 1 ]; then
     echo ""
 fi
 
+# --- Ensure Python requirements (idempotent: skips satisfied packages) ---
+REQ_FILE="$REPO_DIR/server/requirements.txt"
+if [ ! -f "$REQ_FILE" ]; then
+    REQ_FILE="$INSTALL_DIR/requirements.txt"
+fi
+if [ -f "$REQ_FILE" ]; then
+    echo "[INFO] Verifying Python packages..."
+    if "$VENV_PY" -m pip install --quiet -r "$REQ_FILE"; then
+        echo "[OK] Python packages verified."
+    else
+        echo "[WARN] Some packages may not have installed cleanly. Continuing anyway..."
+    fi
+else
+    echo "[WARN] requirements.txt not found, skipping package check."
+fi
+
 # --- Start server ---
 echo "=========================================="
 echo " Starting Ailia TTS server (v$REPO_VERSION)"
