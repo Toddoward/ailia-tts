@@ -74,6 +74,11 @@ if not exist "CosyVoice" (
     )
 )
 cd CosyVoice
+if errorlevel 1 (
+    echo [ERROR] Failed to enter CosyVoice directory
+    pause
+    exit /b 1
+)
 echo [*] Installing minimal CosyVoice3 inference deps (skipping whisper/ASR, not needed for TTS)...
 pip install transformers librosa soundfile numpy --quiet
 if errorlevel 1 (
