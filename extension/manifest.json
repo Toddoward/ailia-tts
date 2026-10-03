@@ -1,0 +1,36 @@
+{
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "Ailia TTS"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "src/content.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "description": "Realtime bi-streaming TTS via local server",
+  "host_permissions": [
+    "https://*.supabase.co/*"
+  ],
+  "icons": {
+    "128": "icons/icon128.png",
+    "48": "icons/icon48.png"
+  },
+  "manifest_version": 3,
+  "name": "Ailia TTS (Local Streaming)",
+  "permissions": [
+    "storage",
+    "offscreen"
+  ],
+  "version": "0.2.1"
+}
