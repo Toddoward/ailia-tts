@@ -4,5 +4,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .env
-.venv/*
-resources/*
+.venv/
+resources/
+models/
+CosyVoice/

@@ -31,7 +31,7 @@ fi
 source .venv/bin/activate
 
 # Upgrade pip and build tools
-pip install --upgrade pip setuptools wheel --quiet
+pip install --upgrade pip "setuptools<81" wheel --quiet
 
 # Install PyTorch
 echo "[*] Installing PyTorch..."
@@ -48,12 +48,18 @@ pip install websockets numpy soundfile librosa huggingface_hub --quiet
 # Clone CosyVoice3
 if [ ! -d "CosyVoice" ]; then
     echo "[*] Cloning CosyVoice3..."
-    git clone --quiet https://github.com/FunAudioLLM/CosyVoice.git
+    git clone --quiet --recursive https://github.com/FunAudioLLM/CosyVoice.git
 fi
 cd CosyVoice
-echo "[*] Installing minimal CosyVoice3 inference deps (skipping whisper/ASR)..."
-pip install --quiet transformers librosa soundfile numpy || {
+echo "[*] Installing CosyVoice3 dependencies (excluding whisper)..."
+python3 -c "open('requirements_filtered.txt','w').write(''.join(l for l in open('requirements.txt', encoding='utf-8') if 'whisper' not in l.lower()))"
+pip install --quiet -r requirements_filtered.txt || {
     echo "[ERROR] CosyVoice3 deps failed"
+    exit 1
+}
+echo "[*] Installing openai-whisper (no build isolation)..."
+pip install --quiet --no-build-isolation openai-whisper || {
+    echo "[ERROR] Whisper install failed"
     exit 1
 }
 cd ..

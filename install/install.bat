@@ -38,7 +38,7 @@ call .venv\Scripts\activate.bat
 
 REM Upgrade pip and install build tools
 echo [*] Upgrading pip and build tools...
-python -m pip install --upgrade pip setuptools wheel --quiet
+python -m pip install --upgrade pip "setuptools<81" wheel --quiet
 if errorlevel 1 (
     echo [ERROR] pip upgrade failed
     pause
@@ -66,7 +66,7 @@ if errorlevel 1 (
 REM Clone official CosyVoice3
 if not exist "CosyVoice" (
     echo [*] Cloning CosyVoice3...
-    git clone --quiet https://github.com/FunAudioLLM/CosyVoice.git
+    git clone --quiet --recursive https://github.com/FunAudioLLM/CosyVoice.git
     if errorlevel 1 (
         echo [ERROR] Git clone failed. Is git installed?
         pause
@@ -79,10 +79,18 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo [*] Installing minimal CosyVoice3 inference deps (skipping whisper/ASR, not needed for TTS)...
-pip install transformers librosa soundfile numpy --quiet
+echo [*] Installing CosyVoice3 dependencies (excluding whisper)...
+python -c "open('requirements_filtered.txt','w').write(''.join(l for l in open('requirements.txt', encoding='utf-8') if 'whisper' not in l.lower()))"
+pip install -r requirements_filtered.txt --quiet
 if errorlevel 1 (
     echo [ERROR] CosyVoice3 deps install failed
+    pause
+    exit /b 1
+)
+echo [*] Installing openai-whisper (no build isolation)...
+pip install --no-build-isolation openai-whisper --quiet
+if errorlevel 1 (
+    echo [ERROR] Whisper install failed
     pause
     exit /b 1
 )

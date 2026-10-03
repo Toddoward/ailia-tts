@@ -16,7 +16,7 @@ Protocol:
 True bi-streaming: text deltas are fed to the model immediately,
 audio chunks stream back as generated. No sentence buffering.
 """
-
+import sys
 import argparse
 import asyncio
 import base64
@@ -24,6 +24,9 @@ import io
 import json
 import logging
 from pathlib import Path
+_cosv = Path(__file__).resolve().parent.parent / "CosyVoice"
+sys.path.insert(0, str(_cosv))
+sys.path.insert(0, str(_cosv / "third_party" / "Matcha-TTS"))
 
 import numpy as np
 
