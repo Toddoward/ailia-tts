@@ -88,6 +88,8 @@ class StreamingServer:
                     msg = json.loads(raw)
                 except Exception:
                     continue
+                if not isinstance(msg, dict):
+                    continue
                 await self.handle_message(ws, msg)
         except Exception:
             log.info("Client disconnected")
